@@ -14,8 +14,8 @@ import (
 )
 
 func GenerateKeys() error {
-	if _, err := os.Stat("env"); os.IsNotExist(err) {
-		if err := os.Mkdir("env", os.ModePerm); err != nil {
+	if _, err := os.Stat("server-env"); os.IsNotExist(err) {
+		if err := os.Mkdir("server-env", os.ModePerm); err != nil {
 			return fmt.Errorf("Error creating directory: %v\n", err)
 		}
 	}
@@ -49,14 +49,14 @@ func GenerateKeys() error {
 		return fmt.Errorf("Error creating DER bytes: %v\n", err)
 	}
 
-	certOut, err := os.Create("env/cert.pem")
+	certOut, err := os.Create("server-env/cert.pem")
 	if err != nil {
 		return fmt.Errorf("Error creating file: %v\n", err)
 	}
 	defer certOut.Close()
 	pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
 
-	keyOut, err := os.Create("env/key.pem")
+	keyOut, err := os.Create("server-env/key.pem")
 	if err != nil {
 		return fmt.Errorf("Error creating file: %v\n", err)
 	}

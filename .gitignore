@@ -2,7 +2,8 @@
 
 secrets/
 .env
-env/
+server-env/
+client-env/
 
 bin/
 
