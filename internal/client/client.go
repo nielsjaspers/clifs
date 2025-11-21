@@ -1,30 +1,21 @@
 package client
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/nielsjaspers/clifs/internal/config"
 	"github.com/nielsjaspers/clifs/internal/keygen"
 )
 
-// func HandleClient(hostname string) {
-// 	err := CheckServer(hostname)
-// 	if err != nil {
-// 		log.Fatalf("Error checking server: %v", err)
-// 	}
-// 	// TODO: Implement proper trust verification flow using flags
-// 	err = TrustServer(hostname)
-// 	if err != nil {
-// 		log.Fatalf("Error verifying the certificates for %s: %v", hostname, err)
-// 	}
-// 	log.Printf("Certificates verified for %s", hostname)
-
-// }
 type Client struct {
 	conf config.Config
 }
@@ -105,7 +96,44 @@ func (c *Client) IsServerTrusted(hostname string) bool {
 	return savedFingerprint == checkFingerprint
 }
 
+// GetTrustedClient returns an http.Client that uses the trusted certificate
+// for the given hostname. If the certificate is not trusted, it returns an
+// error.
+//
+// hostname: the hostname of the server to get the client for.
+//
+// Returns:
+//
+// *http.Client: an http.Client that uses the trusted certificate for the given hostname.
+//
+// error: an error if the certificate is not trusted.
 func (c *Client) GetTrustedClient(hostname string) (*http.Client, error) {
+	caPool, err := c.GetTrustedCaPool(hostname)
+	if err != nil {
+		return nil, err
+	}
+
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			RootCAs: caPool,
+		},
+	}
+
+	return &http.Client{Transport: tr}, nil
+}
+
+// GetTrustedCaPool returns an x509.CertPool that contains the trusted
+// certificate for the given hostname. If the certificate is not trusted,
+// it returns an error.
+//
+// hostname: the hostname of the server to get the caPool for.
+//
+// Returns:
+//
+// *x509.CertPool: an x509.CertPool that contains the trusted certificate for the given hostname.
+//
+// error: an error if the certificate is not trusted.
+func (c *Client) GetTrustedCaPool(hostname string) (*x509.CertPool, error) {
 	certPath := fmt.Sprintf("%s/%s-cert.pem", c.conf.TrustedCertsDir, hostname)
 	certData, err := os.ReadFile(certPath)
 	if err != nil {
@@ -125,13 +153,7 @@ func (c *Client) GetTrustedClient(hostname string) (*http.Client, error) {
 	caPool := x509.NewCertPool()
 	caPool.AddCert(cert)
 
-	return &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				RootCAs: caPool,
-			},
-		},
-	}, nil
+	return caPool, nil
 }
 
 func (c *Client) GetSavedFingerprint(hostname string) string {
@@ -155,6 +177,67 @@ func (c *Client) GetSavedFingerprint(hostname string) string {
 }
 
 func (c *Client) UploadFile(hostname string, path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %v", err)
+	}
+	defer file.Close()
+
+	caPool, err := c.GetTrustedCaPool(hostname)
+	if err != nil {
+		return fmt.Errorf("failed to get trusted ca pool: %v", err)
+	}
+
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			RootCAs: caPool,
+		},
+	}
+	httpClient := &http.Client{Transport: tr}
+
+	// Create a new form data buffer
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	// Create a form file field and add the file
+	part, err := writer.CreateFormFile("file", filepath.Base(path))
+	if err != nil {
+		return fmt.Errorf("failed to create form file: %w", err)
+	}
+
+	// Copy the file data to the form
+	if _, err = io.Copy(part, file); err != nil {
+		return fmt.Errorf("failed to copy file data: %w", err)
+	}
+
+	// Close the multipart writer to finalize the body
+	err = writer.Close()
+	if err != nil {
+		return fmt.Errorf("failed to close multipart writer: %w", err)
+	}
+
+	// Create the request
+	url := fmt.Sprintf("https://%s/upload", hostname)
+	req, err := http.NewRequest("POST", url, body)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set the content type to the multipart form boundary
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	// Send the request
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check for successful upload
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("server returned error: %s (%d)", string(bodyBytes), resp.StatusCode)
+	}
 	return nil
 }
 
