@@ -22,12 +22,6 @@ func NewServer(conf config.Config) *Server {
 }
 
 func (s *Server) HandleServer() {
-	// // TODO: Change key generation to flag instead on every start
-	// err := keygen.GenerateKeys()
-	// if err != nil {
-	// 	log.Fatalf("Error creating keys: %v\n", err)
-	// }
-
 	certFile := s.conf.CertPath
 	keyFile := s.conf.KeyPath
 
