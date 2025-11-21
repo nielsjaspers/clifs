@@ -10,39 +10,47 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/nielsjaspers/clifs/internal/keygen"
+	"github.com/nielsjaspers/clifs/internal/config"
 )
 
-func HandleServer() {
-	// TODO: Change key generation to flag instead on every start
-	err := keygen.GenerateKeys()
-	if err != nil {
-		log.Fatalf("Error creating keys: %v\n", err)
-	}
+type Server struct {
+	conf config.Config
+}
 
-	certFile := "server-env/cert.pem"
-	keyFile := "server-env/key.pem"
+func NewServer(conf config.Config) *Server {
+	return &Server{conf: conf}
+}
 
-	http.HandleFunc("/", HelloServer)
-	http.HandleFunc("/upload", handleUpload)
+func (s *Server) HandleServer() {
+	// // TODO: Change key generation to flag instead on every start
+	// err := keygen.GenerateKeys()
+	// if err != nil {
+	// 	log.Fatalf("Error creating keys: %v\n", err)
+	// }
+
+	certFile := s.conf.CertPath
+	keyFile := s.conf.KeyPath
+
+	http.HandleFunc("/", s.HelloServer)
+	http.HandleFunc("/upload", s.handleUpload)
 
 	server := &http.Server{
-		Addr:      ":443",
+		Addr:      fmt.Sprintf(":%d", s.conf.Port),
 		TLSConfig: &tls.Config{},
 	}
 
-	log.Println("Starting server on port 443...")
-	err = server.ListenAndServeTLS(certFile, keyFile)
+	log.Printf("Starting server on port %d...\n", s.conf.Port)
+	err := server.ListenAndServeTLS(certFile, keyFile)
 	if err != nil {
 		log.Fatalf("Error starting server: %v\n", err)
 	}
 }
 
-func HelloServer(w http.ResponseWriter, req *http.Request) {
+func (s *Server) HelloServer(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "Hello, %s!", req.URL.Path[1:])
 }
 
-func handleUpload(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// Only allow POST requests
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -68,8 +76,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	safeFilename := filepath.Clean(fileName)
 
 	// Create the destination file
-	// TODO: change to use config.UploadDir
-	dst, err := os.Create(filepath.Join("./uploads", safeFilename))
+	dst, err := os.Create(filepath.Join(s.conf.UploadDir, safeFilename))
 	if err != nil {
 		http.Error(w, "Failed to create file: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -81,7 +88,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to save file: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("Received file: %s (size: %d bytes)", header.Filename, header.Size)
+	log.Printf("Received file: %s (size: %d bytes)\n", header.Filename, header.Size)
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "File uploaded successfully: %s", safeFilename)
 }
