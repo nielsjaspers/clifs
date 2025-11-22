@@ -4,17 +4,51 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 
 	"github.com/nielsjaspers/clifs/internal/client"
 	"github.com/nielsjaspers/clifs/internal/config"
 )
+
+// StringSlice is a custom flag type that accepts multiple string values
+type StringSlice []string
+
+func (s *StringSlice) String() string {
+	return strings.Join(*s, ",")
+}
+
+func (s *StringSlice) Set(value string) error {
+	*s = append(*s, value)
+	return nil
+}
 
 func main() {
 	host := flag.String("host", "", "Server host")
 	port := flag.Int("port", 443, "Server port")
 	checkServer := flag.Bool("check", false, "Check if the server is reachable")
 	trustServer := flag.Bool("trust", false, "Trust the server")
-	path := flag.String("path", "", "Path to file to upload")
+	var paths StringSlice
+	flag.Var(&paths, "path", "Path to file(s) to upload (can specify multiple files)")
+
+	// Custom parsing to support -path fileA fileB fileC syntax
+	args := os.Args[1:]
+	var parsedArgs []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-path" || arg == "--path" {
+			// Consume all following arguments until we hit another flag
+			for i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				i++
+				parsedArgs = append(parsedArgs, "-path", args[i])
+			}
+		} else {
+			parsedArgs = append(parsedArgs, arg)
+		}
+	}
+
+	// Parse the modified args
+	os.Args = append([]string{os.Args[0]}, parsedArgs...)
 	flag.Parse()
 
 	clientConfig := config.Config{
@@ -52,8 +86,8 @@ func main() {
 		return
 	}
 
-	if *path != "" {
-		err := c.UploadFile(fmt.Sprintf("%s:%d", *host, *port), *path)
+	if len(paths) > 0 {
+		err := c.UploadFile(fmt.Sprintf("%s:%d", *host, *port), paths...)
 		if err != nil {
 			log.Fatalf("Failed to upload file: %v", err)
 		}

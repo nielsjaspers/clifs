@@ -176,12 +176,10 @@ func (c *Client) GetSavedFingerprint(hostname string) string {
 	return keygen.GetFingerprintFromCert(cert)
 }
 
-func (c *Client) UploadFile(hostname string, path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("failed to open file: %v", err)
+func (c *Client) UploadFile(hostname string, paths ...string) error {
+	if len(paths) == 0 {
+		return fmt.Errorf("no file paths provided")
 	}
-	defer file.Close()
 
 	caPool, err := c.GetTrustedCaPool(hostname)
 	if err != nil {
@@ -199,15 +197,30 @@ func (c *Client) UploadFile(hostname string, path string) error {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
-	// Create a form file field and add the file
-	part, err := writer.CreateFormFile("file", filepath.Base(path))
-	if err != nil {
-		return fmt.Errorf("failed to create form file: %w", err)
-	}
+	// Add each file to the multipart form
+	for _, path := range paths {
+		file, err := os.Open(path)
+		if err != nil {
+			writer.Close()
+			return fmt.Errorf("failed to open file %s: %v", path, err)
+		}
 
-	// Copy the file data to the form
-	if _, err = io.Copy(part, file); err != nil {
-		return fmt.Errorf("failed to copy file data: %w", err)
+		// Create a form file field and add the file
+		part, err := writer.CreateFormFile("file", filepath.Base(path))
+		if err != nil {
+			file.Close()
+			writer.Close()
+			return fmt.Errorf("failed to create form file for %s: %w", path, err)
+		}
+
+		// Copy the file data to the form
+		if _, err = io.Copy(part, file); err != nil {
+			file.Close()
+			writer.Close()
+			return fmt.Errorf("failed to copy file data for %s: %w", path, err)
+		}
+
+		file.Close()
 	}
 
 	// Close the multipart writer to finalize the body
